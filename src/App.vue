@@ -1,7 +1,8 @@
 <template>
   <find-place v-if='!placeFound' @loaded='onGridLoaded'></find-place>
+  <poster-studio v-if='studioPlace' :place='studioPlace' @start-over='startOver'></poster-studio>
   <div id="app">
-    <div v-if='placeFound'>
+    <div v-if='placeFound && !studioPlace'>
       <div class='controls'>
         <a href="#" class='print-button' @click.prevent='toggleSettings'>Customize...</a>
         <a href="#" class='try-another' @click.prevent='startOver'>Try another city</a>
@@ -70,8 +71,8 @@
     </div>
   </div>
 
-  <editable-label v-if='placeFound' v-model='name' class='city-name' :printable='true' :style='{color: labelColorRGBA}' :overlay-manager='overlayManager'></editable-label>
-  <div v-if='placeFound' class='license printable can-drag' :style='{color: labelColorRGBA}'>data <a href='https://www.openstreetmap.org/about/' target="_blank" :style='{color: labelColorRGBA}'>© OpenStreetMap</a></div>
+  <editable-label v-if='placeFound && !studioPlace' v-model='name' class='city-name' :printable='true' :style='{color: labelColorRGBA}' :overlay-manager='overlayManager'></editable-label>
+  <div v-if='placeFound && !studioPlace' class='license printable can-drag' :style='{color: labelColorRGBA}'>data <a href='https://www.openstreetmap.org/about/' target="_blank" :style='{color: labelColorRGBA}'>© OpenStreetMap</a></div>
 </template>
 
 <script>
@@ -79,6 +80,8 @@ import FindPlace from './components/FindPlace.vue';
 import LoadingIcon from './components/LoadingIcon.vue';
 import EditableLabel from './components/EditableLabel.vue';
 import ColorPicker from './components/ColorPicker.vue';
+import PosterStudio from './components/PosterStudio.vue';
+import {markRaw} from 'vue';
 import createScene from './lib/createScene.js';
 import GridLayer from './lib/GridLayer.js';
 import generateZazzleLink from './lib/getZazzleLink.js';
@@ -104,11 +107,14 @@ export default {
     FindPlace,
     LoadingIcon,
     EditableLabel,
-    ColorPicker
+    ColorPicker,
+    PosterStudio
   },
   data() {
     return {
       placeFound: false,
+      // Set when the map comes from vector tiles: the poster studio takes over.
+      studioPlace: null,
       name: '',
       zazzleLink: null,
       generatingPreview: false,
@@ -152,6 +158,12 @@ export default {
       this.zazzleLink = null;
     },
     onGridLoaded(grid) {
+      if (grid.store) {
+        // Vector tiles. Not reactive: the tile store holds a lot of data.
+        this.studioPlace = markRaw(grid);
+        this.placeFound = true;
+        return;
+      }
       if (grid.isArea) {
         appState.set('areaId', grid.id);
         appState.unset('osm_id');
@@ -180,7 +192,9 @@ export default {
 
     startOver() {
       appState.unset('areaId');
+      appState.unset('osm_type');
       appState.unsetPlace();
+      this.studioPlace = null;
       appState.unset('q');
       appState.enableCache();
 
@@ -204,6 +218,8 @@ export default {
     },
 
     updateLayers() {
+      // The poster studio owns its scene and fires the same bus events.
+      if (!this.scene) return;
       // TODO: This method likely doesn't belong here
       let newLayers = [];
       let lastLayer = 0;

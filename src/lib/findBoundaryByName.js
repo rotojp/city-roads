@@ -2,17 +2,57 @@ import request from './request.js';
 
 let cachedResults = new Map();
 
+/**
+ * Boundary polygons (simplified by Nominatim to ~30m) are used for the optional
+ * "clip to city boundary" mode.
+ */
+const GEOMETRY_PARAMS = 'polygon_geojson=1&polygon_threshold=0.0003';
+
 export default function findBoundaryByName(inputName) {
   let results = cachedResults.get(inputName);
   if (results) return Promise.resolve(results);
 
   let name = encodeURIComponent(inputName);
-  return request(`https://nominatim.openstreetmap.org/search?format=json&q=${name}`, {responseType: 'json'})
+  return request(`https://nominatim.openstreetmap.org/search?format=json&${GEOMETRY_PARAMS}&q=${name}`, {responseType: 'json'})
       .then(extractBoundaries)
       .then(x => {
         cachedResults.set(inputName, x);
         return x;
       });
+}
+
+/**
+ * Finds a single place by its OSM type ('relation' | 'way' | 'node') and id.
+ * Used to restore a place from the URL.
+ */
+export function lookupBoundary(osmType, osmId) {
+  let prefix = {relation: 'R', way: 'W', node: 'N'}[osmType];
+  if (!prefix) return Promise.reject(new Error('Unknown OSM type ' + osmType));
+
+  let key = prefix + osmId;
+  let results = cachedResults.get(key);
+  if (results) return Promise.resolve(results[0]);
+
+  return request(`https://nominatim.openstreetmap.org/lookup?format=json&${GEOMETRY_PARAMS}&osm_ids=${key}`, {responseType: 'json'})
+    .then(extractBoundaries)
+    .then(x => {
+      cachedResults.set(key, x);
+      return x[0];
+    });
+}
+
+/**
+ * Returns {city, country} of a location, used to title posters of GPS routes.
+ */
+export function reverseGeocode(lat, lon) {
+  return request(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&addressdetails=1&lat=${lat}&lon=${lon}`, {responseType: 'json'})
+    .then(result => {
+      let address = (result && result.address) || {};
+      return {
+        city: address.city || address.town || address.village || address.municipality || address.county || '',
+        country: address.country || ''
+      };
+    });
 }
 
 function extractBoundaries(x) {
@@ -47,6 +87,7 @@ function extractBoundaries(x) {
         osmType: row.osm_type,
         name: row.display_name,
         type: row.type,
+        geojson: row.geojson,
       };
     });
 

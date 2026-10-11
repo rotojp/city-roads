@@ -7,6 +7,7 @@ import tinycolor from 'tinycolor2';
 import eventify from 'ngraph.events';
 import {toSVG, toPNG} from './saveFile.js';
 import * as wgl from 'w-gl';
+import AreaUnderlay from './AreaUnderlay.js';
 
 /**
  * This file is responsible for rendering of the grid. It uses my silly 2d webgl
@@ -30,10 +31,12 @@ export default function createScene(canvas) {
 
   let gl = scene.getGL();
   gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  patchInstancedArrays(gl);
 
   let slowDownZoom = false;
   let layers = [];
   let backgroundColor = config.getBackgroundColor();
+  let areaUnderlay = null;
 
   listenToEvents();
 
@@ -82,6 +85,8 @@ export default function createScene(canvas) {
      * Destroys the scene, cleans up all resources.
      */
     dispose() {
+      if (areaUnderlay) areaUnderlay.dispose();
+      areaUnderlay = null;
       scene.clear();
       scene.dispose();
       sceneAPI.fire('dispose', sceneAPI);
@@ -110,8 +115,8 @@ export default function createScene(canvas) {
      */
     set background(rawColor) {
       backgroundColor = tinycolor(rawColor);
-      let c = backgroundColor.toRgb();
-      scene.setClearColor(c.r/0xff, c.g/0xff, c.b/0xff, c.a);
+      if (areaUnderlay) areaUnderlay.setColor('background', backgroundColor);
+      updateClearColor();
       scene.renderFrame();
       bus.fire('background-color', backgroundColor);
       sceneAPI.fire('background-color', backgroundColor);
@@ -119,6 +124,47 @@ export default function createScene(canvas) {
 
     get background() {
       return backgroundColor;
+    },
+
+    /**
+     * Creates a canvas for water and green areas (parks, forests). They are
+     * rendered below the roads and can be toggled with `areasVisible`.
+     * `projector` is the d3 projection used for road layers.
+     */
+    createAreaUnderlay(projector) {
+      if (areaUnderlay) areaUnderlay.dispose();
+      areaUnderlay = new AreaUnderlay(scene, projector, {background: backgroundColor.toRgbString()});
+      return areaUnderlay;
+    },
+
+    hasAreas() {
+      return !!areaUnderlay;
+    },
+
+    set areasVisible(isVisible) {
+      if (!areaUnderlay) return;
+      areaUnderlay.setVisible(isVisible);
+      updateClearColor();
+      scene.renderFrame();
+    },
+
+    get areasVisible() {
+      return !!(areaUnderlay && areaUnderlay.visible);
+    },
+
+    /**
+     * Sets color of 'water' or 'green' areas.
+     */
+    setAreaColor(name, color) {
+      if (areaUnderlay) areaUnderlay.setColor(name, color);
+    },
+
+    getAreaColor(name) {
+      return areaUnderlay && areaUnderlay.colors[name];
+    },
+
+    getAreaUnderlay() {
+      return areaUnderlay;
     },
 
     add,
@@ -184,6 +230,7 @@ export default function createScene(canvas) {
       let viewBox = gridLayer.getViewBox();
       if (viewBox) {
         scene.setViewBox(viewBox);
+        if (areaUnderlay) areaUnderlay.requestDraw();
       }
     }
   }
@@ -197,7 +244,18 @@ export default function createScene(canvas) {
   }
 
   function triggerTransform(t) {
+    if (areaUnderlay) areaUnderlay.requestDraw();
     bus.fire('scene-transform');
+  }
+
+  function updateClearColor() {
+    if (areaUnderlay && areaUnderlay.visible) {
+      // the underlay paints the background; WebGL canvas must be transparent.
+      scene.setClearColor(0, 0, 0, 0);
+    } else {
+      let c = backgroundColor.toRgb();
+      scene.setClearColor(c.r/0xff, c.g/0xff, c.b/0xff, c.a);
+    }
   }
 
   function triggerAdd(e) {
@@ -231,4 +289,23 @@ export default function createScene(canvas) {
       slowDownZoom = false;
     }
   }
+}
+/**
+ * w-gl 0.21 thick lines (any `lineWidth` other than 1) call
+ * `vertexAttribDivisorANGLE(locations.attributes.aFromColor, 1)` even when
+ * per-vertex colors are disabled. The location is `undefined` then, WebGL
+ * converts it to attribute 0, which turns the quad positions into per-instance
+ * data - and nothing is drawn. Ignore calls with missing attribute locations.
+ */
+function patchInstancedArrays(gl) {
+  let ext = gl.getExtension('ANGLE_instanced_arrays');
+  if (!ext || ext.vertexAttribDivisorANGLE.patchedByCityRoads) return;
+
+  let original = ext.vertexAttribDivisorANGLE.bind(ext);
+  let patched = function(index, divisor) {
+    if (index === undefined || index === null || index < 0) return;
+    original(index, divisor);
+  };
+  patched.patchedByCityRoads = true;
+  ext.vertexAttribDivisorANGLE = patched;
 }
