@@ -1,12 +1,13 @@
 import request from './request.js';
 import Progress from './Progress.js';
 
+// Public Overpass instances: https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances
+// Note: Overpass is only a fallback now, vector tiles are the primary data source.
 let backends = [
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-  'https://overpass.osm.jp/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.openstreetmap.ru/cgi/interpreter'
+  'https://overpass.kumi.systems/api/interpreter'
 ]
 
 export default function postData(data, progress) {

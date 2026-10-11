@@ -48,11 +48,33 @@ export function getPrintableCanvas(scene) {
   printable.width = width;
   printable.height = height;
   scene.render();
+  let underlay = scene.getAreaUnderlay && scene.getAreaUnderlay();
+  if (underlay && underlay.visible) {
+    // WebGL canvas is transparent while areas are visible, the underlay paints background and areas.
+    underlay.draw();
+    ctx.drawImage(underlay.canvas, 0, 0, underlay.canvas.width, underlay.canvas.height, 0, 0, width, height);
+  }
   ctx.drawImage(cityCanvas, 0, 0, cityCanvas.width, cityCanvas.height, 0, 0, width, height);
 
   return Promise.all(collectPrintable().map(label => drawTextLabel(label, ctx))).then(() => {
     return printable;
   });
+}
+
+/**
+ * Offers `blob` as a download named `name` + `extension`.
+ */
+export function saveBlob(blob, name, extension) {
+  let url = window.URL.createObjectURL(blob);
+  let fileName = getFileName(name, extension);
+  // Safari doesn't like when download happens on the same event loop cycle.
+  setTimeout(() => {
+    let a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    revokeLater(url);
+  }, 30);
 }
 
 export function getCanvas() {
