@@ -200,7 +200,7 @@
         </template>
       </details>
 
-      <details>
+      <details @toggle='refreshCacheStats'>
         <summary>Map</summary>
         <div class='row'>
           <div class='col'>Water &amp; parks</div>
@@ -215,6 +215,18 @@
             <input type='checkbox' :checked='clipToBoundary' @change='setClipToBoundary($event.target.checked)'>
             clip to city boundary
           </label>
+        </div>
+        <div class='row'>
+          <div class='col'>Tile cache</div>
+          <div class='col c-2 checks'>
+            <span v-if='cacheStats'>{{cacheStats.count.toLocaleString()}} tiles · {{formatMB(cacheStats.bytes)}}</span>
+            <span v-else>not available</span>
+            <a href='#' v-if='cacheStats && cacheStats.count' @click.prevent='clearCache'>clear</a>
+          </div>
+        </div>
+        <div class='row cache-note'>
+          <div class='col'></div>
+          <div class='col c-2'>Downloaded map tiles are kept on this device for 14 days, so places open faster next time.</div>
         </div>
       </details>
 
@@ -272,6 +284,7 @@ import {exportPosterPNG, exportPosterSVG} from '../lib/poster/exportPoster.js';
 import {saveBlob, getCanvas} from '../lib/saveFile.js';
 import {ROAD_GROUPS} from '../lib/tiles/featureClasses.js';
 import appState from '../lib/appState.js';
+import {getCacheStats, clearTileCache} from '../lib/tiles/tileCache.js';
 
 const EXPORT_SIZES = [
   {value: 2400, label: '2400 px (screen, social media)'},
@@ -340,7 +353,8 @@ export default {
       route: null, // route info for the UI; the RouteLayer itself is not reactive
       routeError: '',
       routeStyle: Object.assign({}, DEFAULT_ROUTE_STYLE),
-      routeLegend: null
+      routeLegend: null,
+      cacheStats: null
     };
   },
   computed: {
@@ -414,6 +428,18 @@ export default {
     getCanvas().style.visibility = 'hidden';
   },
   methods: {
+    refreshCacheStats() {
+      getCacheStats().then(stats => this.cacheStats = stats);
+    },
+
+    clearCache() {
+      clearTileCache().then(() => this.refreshCacheStats());
+    },
+
+    formatMB(bytes) {
+      return (bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+    },
+
     toggleSettings() {
       // The poster moves; onPosterLayout() keeps the same map area inside it.
       this.showSettings = !this.showSettings;
@@ -767,6 +793,11 @@ function debounce(fn, ms) {
   color: #c62828;
   font-size: 13px;
   padding: 4px 0;
+}
+
+.cache-note {
+  font-size: 12px;
+  color: #757575;
 }
 
 .route-summary {
